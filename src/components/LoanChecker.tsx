@@ -8,9 +8,10 @@ import { useProfile } from '@/hooks/useProfile';
 import { calculateEMI, calculateDebtToIncome, getRiskLevel, getPersonalizedTips } from '@/lib/financial';
 import { useToast } from '@/hooks/use-toast';
 import { useVoice } from '@/hooks/useVoice';
-
 import { getFinancialAdvice } from '@/lib/interpreter';
 import { Language } from '@/lib/languages';
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 interface LoanCheckerProps {
   currentLanguage: Language;
@@ -49,10 +50,6 @@ export function LoanChecker({ currentLanguage }: LoanCheckerProps) {
 
     setResult({ emi, dti, risk, tips, warning });
 
-    setResult({ emi, dti, risk, tips, warning });
-
-    // Speak the result in the user's language
-    // We use the LLM to humanize the data into the target language
     getFinancialAdvice({
       emi: Math.round(emi),
       debtToIncome: dti.toFixed(1),
@@ -65,13 +62,11 @@ export function LoanChecker({ currentLanguage }: LoanCheckerProps) {
 
   const handleSaveLoan = () => {
     if (!result) return;
-    const p = parseFloat(principal);
-    const r = parseFloat(rate);
-    const n = parseInt(tenure);
+
     addLoan.mutate({
-      loan_amount: p,
-      interest_rate: r,
-      tenure: n,
+      loan_amount: parseFloat(principal),
+      interest_rate: parseFloat(rate),
+      tenure: parseInt(tenure),
       emi: Math.round(result.emi),
       risk_score: result.dti,
       risk_level: result.risk.level,
@@ -79,6 +74,41 @@ export function LoanChecker({ currentLanguage }: LoanCheckerProps) {
     }, {
       onSuccess: () => toast({ title: 'Loan saved to history' }),
     });
+  };
+
+  // ✅ NEW SIMPLE PDF GENERATION + SEND
+  const handleSendReport = async () => {
+    const element = document.getElementById("loan-report");
+
+    if (!element) {
+      toast({ title: "No report available", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const canvas = await html2canvas(element);
+      const imgData = canvas.toDataURL("image/png");
+
+      const pdf = new jsPDF();
+      const imgWidth = 190;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      pdf.addImage(imgData, "PNG", 10, 10, imgWidth, imgHeight);
+
+      const pdfBlob = pdf.output("blob");
+
+      const formData = new FormData();
+      formData.append("file", pdfBlob, "LoanReport.pdf");
+
+      await fetch("http://localhost:5000/send-report", {
+        method: "POST",
+        body: formData,
+      });
+
+      toast({ title: "Report sent successfully 📧" });
+    } catch (error) {
+      toast({ title: "Failed to send report", variant: "destructive" });
+    }
   };
 
   return (
@@ -102,53 +132,52 @@ export function LoanChecker({ currentLanguage }: LoanCheckerProps) {
           </div>
         </div>
 
-        <Button onClick={handleCheck} className="w-full">Check Loan Eligibility</Button>
+        <Button onClick={handleCheck} className="w-full">
+          Check Loan Eligibility
+        </Button>
 
         {result && (
-          <div className="space-y-3 animate-fade-in">
-            <div className={`p-4 rounded-lg border ${result.risk.level === 'safe' ? 'bg-primary/10 border-primary/30' :
-              result.risk.level === 'caution' ? 'bg-warning/10 border-warning/30' :
-                'bg-destructive/10 border-destructive/30'
-              }`}>
+          <div id="loan-report" className="space-y-3 animate-fade-in">
+
+            <div className={`p-4 rounded-lg border ${
+              result.risk.level === 'safe'
+                ? 'bg-primary/10 border-primary/30'
+                : result.risk.level === 'caution'
+                ? 'bg-warning/10 border-warning/30'
+                : 'bg-destructive/10 border-destructive/30'
+            }`}>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <span className="text-muted-foreground">Monthly EMI</span>
-                  <p className="font-display font-bold text-lg">₹{Math.round(result.emi).toLocaleString()}</p>
+                  <p className="font-display font-bold text-lg">
+                    ₹{Math.round(result.emi).toLocaleString()}
+                  </p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Risk Level</span>
-                  <p className={`font-display font-bold text-lg ${result.risk.level === 'safe' ? 'text-primary' :
-                    result.risk.level === 'caution' ? 'text-warning' :
-                      'text-destructive'
-                    }`}>{result.risk.label}</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Debt-to-Income</span>
-                  <p className="font-bold">{result.dti.toFixed(1)}%</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Status</span>
-                  <p className="font-bold">{result.risk.level === 'safe' ? '✅ Affordable' : result.risk.level === 'caution' ? '⚠️ Tight' : '🚫 Risky'}</p>
+                  <p className="font-display font-bold text-lg">
+                    {result.risk.label}
+                  </p>
                 </div>
               </div>
             </div>
 
-            {result.warning && (
-              <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-sm text-destructive">
-                {result.warning}
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground font-medium">Recommended Actions:</p>
-              {result.tips.map((tip, i) => (
-                <p key={i} className="text-sm text-secondary-foreground">• {tip}</p>
-              ))}
-            </div>
-
-            <Button variant="secondary" onClick={handleSaveLoan} className="w-full" disabled={addLoan.isPending}>
+            <Button
+              variant="secondary"
+              onClick={handleSaveLoan}
+              className="w-full"
+              disabled={addLoan.isPending}
+            >
               Save to Loan History
             </Button>
+
+            <Button
+              onClick={handleSendReport}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Mail Me PDF Report
+            </Button>
+
           </div>
         )}
       </CardContent>

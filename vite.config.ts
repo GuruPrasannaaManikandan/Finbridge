@@ -8,6 +8,9 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    allowedHosts: [
+      "finbridge-gku5.onrender.com"
+    ],
     hmr: {
       overlay: false,
     },
